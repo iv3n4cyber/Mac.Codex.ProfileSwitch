@@ -9,12 +9,14 @@ struct MenuBarPopoverView: View {
     let tokenUsageSummary: LocalTokenUsageSummary
     let errorMessage: String?
     let currentLanguage: AppLanguage
+    let resetDisplayMode: QuotaResetDisplayMode
     let openManagement: () -> Void
     let switchProfile: (String) -> Void
     let refreshAllUsage: () -> Void
     let addOAuthAccount: () -> Void
     let addProvider: () -> Void
     let changeLanguage: (AppLanguage) -> Void
+    let toggleResetDisplayMode: () -> Void
     let restartCodex: () -> Void
     let refreshUsage: (CodexProfile) -> Void
     let exit: () -> Void
@@ -174,9 +176,11 @@ struct MenuBarPopoverView: View {
                     isCurrent: true,
                     usageState: self.quotaStates[currentProfile.name] ?? .idle,
                     isProminent: true,
+                    resetDisplayMode: self.resetDisplayMode,
                     onRefreshUsage: {
                         self.refreshUsage(currentProfile)
-                    }
+                    },
+                    onToggleResetDisplayMode: self.toggleResetDisplayMode
                 ) {
                     switchProfile(currentProfile.name)
                 }
@@ -204,12 +208,14 @@ struct MenuBarPopoverView: View {
                             profiles: group.profiles,
                             isCollapsed: self.collapsedGroups.contains(group.title),
                             quotaStates: self.quotaStates,
+                            resetDisplayMode: self.resetDisplayMode,
                             onToggle: {
                                 self.toggleGroup(group.title)
                             },
                             onRefreshUsage: { profile in
                                 self.refreshUsage(profile)
-                            }
+                            },
+                            onToggleResetDisplayMode: self.toggleResetDisplayMode
                         ) { profile in
                             switchProfile(profile.name)
                         }
@@ -535,8 +541,10 @@ private struct ProfileGroupSection: View {
     let profiles: [CodexProfile]
     let isCollapsed: Bool
     let quotaStates: [String: UsageRefreshState]
+    let resetDisplayMode: QuotaResetDisplayMode
     let onToggle: () -> Void
     let onRefreshUsage: (CodexProfile) -> Void
+    let onToggleResetDisplayMode: () -> Void
     let onSelect: (CodexProfile) -> Void
 
     var body: some View {
@@ -570,9 +578,11 @@ private struct ProfileGroupSection: View {
                             isCurrent: profile.isCurrent,
                             usageState: self.quotaStates[profile.name] ?? .idle,
                             isProminent: false,
+                            resetDisplayMode: self.resetDisplayMode,
                             onRefreshUsage: {
                                 self.onRefreshUsage(profile)
-                            }
+                            },
+                            onToggleResetDisplayMode: self.onToggleResetDisplayMode
                         ) {
                             onSelect(profile)
                         }
@@ -588,7 +598,9 @@ private struct ProfileSummaryCard: View {
     let isCurrent: Bool
     let usageState: UsageRefreshState
     let isProminent: Bool
+    let resetDisplayMode: QuotaResetDisplayMode
     let onRefreshUsage: () -> Void
+    let onToggleResetDisplayMode: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -600,21 +612,12 @@ private struct ProfileSummaryCard: View {
                         .foregroundColor(isCurrent ? .accentColor : .secondary)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(primaryLine)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .layoutPriority(1)
-
-                            if let refreshText = refreshCountdownText {
-                                Text(refreshText)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.orange)
-                                    .lineLimit(1)
-                            }
-                        }
+                        Text(primaryLine)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .layoutPriority(1)
 
                         if case .openAIOAuth = profile.kind {
                             UsageStatusLine(state: usageState, prominent: isProminent)
@@ -630,6 +633,15 @@ private struct ProfileSummaryCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .layoutPriority(1)
+
+            if let resetDisplay = resetCountdownDisplay {
+                ResetCountdownText(
+                    display: resetDisplay,
+                    action: onToggleResetDisplayMode
+                )
+                .layoutPriority(2)
+            }
 
             if case .openAIOAuth = profile.kind {
                 Button(action: onRefreshUsage) {
@@ -675,11 +687,105 @@ private struct ProfileSummaryCard: View {
         return profile.name
     }
 
-    private var refreshCountdownText: String? {
+    private var resetCountdownDisplay: QuotaResetCountdownDisplay? {
         guard case .openAIOAuth = profile.kind else { return nil }
         guard case .loaded(let snapshot) = usageState else { return nil }
-        return quotaWindowCountdown(until: snapshot.primaryResetAt)
+        return quotaResetCountdownDisplay(for: snapshot, mode: resetDisplayMode)
     }
+}
+
+private struct QuotaResetCountdownDisplay {
+    let title: String
+    let countdown: String
+    let help: String
+}
+
+private struct ResetCountdownText: View {
+    let display: QuotaResetCountdownDisplay
+    let action: () -> Void
+    @State private var isPresented = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(display.title)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+
+                Text(display.countdown)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.orange)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isPresented = hovering
+        }
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            Text(display.help)
+                .font(.system(size: 11))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+        }
+    }
+}
+
+private func quotaResetCountdownDisplay(for snapshot: OpenAIQuotaSnapshot, mode: QuotaResetDisplayMode) -> QuotaResetCountdownDisplay? {
+    let primaryTitle = windowTitle(seconds: snapshot.primaryLimitWindowSeconds, fallback: "5h")
+    let secondaryTitle = windowTitle(seconds: snapshot.secondaryLimitWindowSeconds, fallback: "7d")
+    let primaryCountdown = quotaWindowCountdown(until: snapshot.primaryResetAt)
+    let secondaryCountdown = quotaWindowCountdown(until: snapshot.secondaryResetAt)
+
+    let preferred: (String, String?) = switch mode {
+    case .primary:
+        (primaryTitle, primaryCountdown)
+    case .secondary:
+        (secondaryTitle, secondaryCountdown)
+    }
+
+    guard let countdown = preferred.1 else {
+        if let primaryCountdown {
+            return QuotaResetCountdownDisplay(
+                title: primaryTitle,
+                countdown: primaryCountdown,
+                help: quotaResetHelp(primaryTitle: primaryTitle, primaryCountdown: primaryCountdown, secondaryTitle: secondaryTitle, secondaryCountdown: secondaryCountdown)
+            )
+        }
+        if let secondaryCountdown {
+            return QuotaResetCountdownDisplay(
+                title: secondaryTitle,
+                countdown: secondaryCountdown,
+                help: quotaResetHelp(primaryTitle: primaryTitle, primaryCountdown: primaryCountdown, secondaryTitle: secondaryTitle, secondaryCountdown: secondaryCountdown)
+            )
+        }
+        return nil
+    }
+
+    return QuotaResetCountdownDisplay(
+        title: preferred.0,
+        countdown: countdown,
+        help: quotaResetHelp(primaryTitle: primaryTitle, primaryCountdown: primaryCountdown, secondaryTitle: secondaryTitle, secondaryCountdown: secondaryCountdown)
+    )
+}
+
+private func quotaResetHelp(
+    primaryTitle: String,
+    primaryCountdown: String?,
+    secondaryTitle: String,
+    secondaryCountdown: String?
+) -> String {
+    [
+        "\(primaryTitle) resets in \(primaryCountdown ?? "-")",
+        "\(secondaryTitle) resets in \(secondaryCountdown ?? "-")"
+    ].joined(separator: "\n")
 }
 
 private func quotaWindowCountdown(until date: Date?) -> String? {
@@ -688,6 +794,11 @@ private func quotaWindowCountdown(until date: Date?) -> String? {
     guard remainingSeconds > 0 else { return "<1m" }
 
     let minutes = Int(ceil(Double(remainingSeconds) / 60.0))
+    if minutes >= 24 * 60 {
+        let days = minutes / (24 * 60)
+        let restHours = (minutes % (24 * 60)) / 60
+        return restHours == 0 ? "\(days)d" : "\(days)d \(restHours)h"
+    }
     if minutes < 60 {
         return "\(minutes)m"
     }

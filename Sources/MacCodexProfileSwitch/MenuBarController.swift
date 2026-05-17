@@ -110,12 +110,14 @@ final class MenuBarController {
             tokenUsageSummary: tokenUsageSummary,
             errorMessage: errorMessage,
             currentLanguage: AppText.currentLanguage,
+            resetDisplayMode: AppText.quotaResetDisplayMode,
             openManagement: { [weak self] in self?.showManagerWindow() },
             switchProfile: { [weak self] name in self?.switchProfile(named: name) },
             refreshAllUsage: { [weak self] in self?.refreshAllOAuthUsage() },
             addOAuthAccount: { [weak self] in self?.addOAuthAccount() },
             addProvider: { [weak self] in self?.addProvider() },
             changeLanguage: { [weak self] language in self?.changeLanguage(to: language) },
+            toggleResetDisplayMode: { [weak self] in self?.toggleResetDisplayMode() },
             restartCodex: { [weak self] in self?.restartCodexClient() },
             refreshUsage: { [weak self] profile in self?.refreshUsage(for: profile) },
             exit: { NSApp.terminate(nil) }
@@ -159,6 +161,15 @@ final class MenuBarController {
         do {
             try AppText.setLanguage(language)
             managerWindowController?.applyLanguage()
+            refreshStatusItem()
+        } catch {
+            Dialogs.showError(error)
+        }
+    }
+
+    private func toggleResetDisplayMode() {
+        do {
+            try AppText.setQuotaResetDisplayMode(AppText.quotaResetDisplayMode.next)
             refreshStatusItem()
         } catch {
             Dialogs.showError(error)
